@@ -97,6 +97,7 @@ export async function POST(req: NextRequest) {
     const vectorStore = await QdrantVectorStore.fromExistingCollection(embeddings, {
       url: process.env.QDRANT_URL,
       collectionName: "knowledge-sources",
+      apiKey: process.env.QDRANT_API_KEY,
     });
 
     const documents = chunks.map((chunk, index) => new Document({

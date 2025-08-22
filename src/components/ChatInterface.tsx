@@ -22,13 +22,25 @@ import {
   Type,
 } from "lucide-react";
 
+interface Source {
+  index: number;
+  relevanceScore: number;
+  preview: string;
+  metadata: {
+    sourceName: string;
+    sourceType: string;
+    chunkIndex: number;
+  };
+}
+
 interface Message {
   id: string;
   content: string;
   role: "user" | "assistant";
   timestamp: Date;
   isTyping?: boolean;
-  sources?: string[];
+  sources?: Source[]; // Updated to use Source interface
+  error?: boolean;
 }
 
 export default function ChatInterface() {
@@ -39,7 +51,7 @@ export default function ChatInterface() {
         "Hello! I'm your AI assistant powered by advanced RAG technology. I can help you analyze and discuss the content you've uploaded. Upload some documents to get started, and I'll be able to provide insights based on your specific content.",
       role: "assistant",
       timestamp: new Date(),
-      sources: ["System"],
+      sources: [],
     },
   ]);
   const [inputValue, setInputValue] = useState("");
@@ -48,7 +60,6 @@ export default function ChatInterface() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Fixed: Simple scroll function without useCallback
   const scrollToBottom = () => {
     if (scrollAreaRef.current) {
       const scrollContainer = scrollAreaRef.current.querySelector(
@@ -60,14 +71,13 @@ export default function ChatInterface() {
     }
   };
 
-  // Fixed: Only depend on messages length, not the function
   useEffect(() => {
     const timer = setTimeout(() => {
       scrollToBottom();
     }, 100);
     
     return () => clearTimeout(timer);
-  }, [messages.length]); // Only messages.length as dependency
+  }, [messages.length]);
 
   const handleSendMessage = async () => {
     if (!inputValue.trim() || isLoading) return;
@@ -80,11 +90,12 @@ export default function ChatInterface() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const currentQuery = inputValue;
     setInputValue("");
     setIsLoading(true);
     setIsTyping(true);
 
-    // Simulate typing indicator
+    // Add typing indicator
     const typingMessage: Message = {
       id: "typing",
       content: "",
@@ -95,47 +106,60 @@ export default function ChatInterface() {
 
     setMessages((prev) => [...prev, typingMessage]);
 
-    // Simulate AI response with more realistic document references
-    setTimeout(() => {
-      const responses = [
-        {
-          content: "Based on the documents you've uploaded, I can see several key themes emerging. Let me analyze the content and provide you with specific insights from your sources. The information suggests that...",
-          sources: ["Document_1.pdf", "Text Document 1", "example.com"],
+    try {
+      // Call the RAG API
+      const response = await fetch('/api/rag/retriver', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        {
-          content: "That's an excellent question! From analyzing your uploaded content, I found relevant information across multiple sources. Here's what the data shows, with specific references to the sections that support this analysis...",
-          sources: ["Website: docs.example.com", "Research_Paper.pdf"],
-        },
-        {
-          content: "I've processed your query against the vector database and found several matching passages. The most relevant information comes from your uploaded documents, particularly focusing on the key concepts you've asked about...",
-          sources: ["Text Document 2", "Technical_Guide.pdf", "blog.example.com"],
-        },
-        {
-          content: "Great question! The documents you've shared contain valuable insights on this matter. Let me synthesize the key findings from across your knowledge base and provide you with a comprehensive answer...",
-          sources: ["Manual.pdf", "Text Document 1"],
-        },
-        {
-          content: "I can see from your uploaded sources that this topic is covered extensively. Let me break down the information I found and cross-reference it with the different documents to give you the most accurate response...",
-          sources: ["research.example.com", "Whitepaper.pdf", "Text Document 3"],
-        },
-      ];
+        body: JSON.stringify({ query: currentQuery }),
+      });
 
-      const randomResponse = responses[Math.floor(Math.random() * responses.length)];
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        const assistantMessage: Message = {
+          id: Math.random().toString(36).substr(2, 9),
+          content: data.answer,
+          role: "assistant",
+          timestamp: new Date(),
+          sources: data.sources,
+        };
+
+        setMessages((prev) =>
+          prev
+            .filter((msg) => msg.id !== "typing")
+            .concat(assistantMessage)
+        );
+      } else {
+        throw new Error(data.error || 'Unknown error occurred');
+      }
+    } catch (error) {
+      console.error('Error calling RAG API:', error);
+      
+      const errorMessage: Message = {
+        id: Math.random().toString(36).substr(2, 9),
+        content: "I apologize, but I encountered an error while processing your request. Please try again.",
+        role: "assistant",
+        timestamp: new Date(),
+        error: true,
+        sources: [],
+      };
 
       setMessages((prev) =>
         prev
           .filter((msg) => msg.id !== "typing")
-          .concat({
-            id: Math.random().toString(36).substr(2, 9),
-            content: randomResponse.content,
-            role: "assistant",
-            timestamp: new Date(),
-            sources: randomResponse.sources,
-          })
+          .concat(errorMessage)
       );
+    } finally {
       setIsLoading(false);
       setIsTyping(false);
-    }, 2000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -151,6 +175,19 @@ export default function ChatInterface() {
 
   const copyMessage = (content: string) => {
     navigator.clipboard.writeText(content);
+  };
+
+  const getSourceIcon = (sourceType: string) => {
+    switch (sourceType) {
+      case 'pdf':
+        return <FileText className="h-3 w-3" />;
+      case 'url':
+        return <Globe className="h-3 w-3" />;
+      case 'text':
+        return <Type className="h-3 w-3" />;
+      default:
+        return <Bot className="h-3 w-3" />;
+    }
   };
 
   return (
@@ -186,7 +223,7 @@ export default function ChatInterface() {
                   <span className="text-green-600 font-medium">Online</span>
                   <span className="text-gray-500">•</span>
                   <Brain className="h-4 w-4 text-purple-500" />
-                  <span className="text-gray-500">GPT-4o</span>
+                  <span className="text-gray-500">RAG Enhanced</span>
                 </div>
               </div>
             </div>
@@ -228,6 +265,8 @@ export default function ChatInterface() {
                       className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center shadow-lg ${
                         message.role === "user"
                           ? "bg-gradient-to-r from-blue-500 to-blue-400"
+                          : message.error
+                          ? "bg-gradient-to-r from-red-500 to-red-400"
                           : "bg-gradient-to-r from-pink-500 to-pink-400"
                       }`}
                       whileHover={{ scale: 1.1, rotate: 5 }}
@@ -248,6 +287,8 @@ export default function ChatInterface() {
                         className={`inline-block p-3 rounded-2xl shadow-lg micro-lift ${
                           message.role === "user"
                             ? "bg-gradient-to-r from-blue-500 to-blue-400 text-white"
+                            : message.error
+                            ? "bg-gradient-to-r from-red-100 to-red-50 text-red-800 border border-red-200"
                             : "glass-card text-gray-800"
                         }`}
                         whileHover={{ scale: 1.02 }}
@@ -260,30 +301,33 @@ export default function ChatInterface() {
                           </div>
                         ) : (
                           <>
-                            <p className="text-sm leading-relaxed">
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">
                               {message.content}
                             </p>
                             
                             {/* Message Metadata for Assistant */}
-                            {message.role === "assistant" && (
+                            {message.role === "assistant" && !message.error && (
                               <div className="mt-3 pt-2 border-t border-gray-200/50">
                                 <div className="flex items-center justify-between">
-                                  {/* Sources - Enhanced display */}
-                                  {message.sources && (
+                                  {/* Sources */}
+                                  {message.sources && message.sources.length > 0 && (
                                     <div className="flex flex-wrap gap-2 mb-3">
-                                      <span className="text-xs font-medium text-gray-600 mr-1">Sources:</span>
+                                      <span className="text-xs font-medium text-gray-600 mr-1">
+                                        Sources ({message.sources.length}):
+                                      </span>
                                       {message.sources.map((source, idx) => (
                                         <motion.div
                                           key={idx}
                                           className="flex items-center space-x-1 px-2 py-1 bg-gradient-to-r from-pink-100 to-purple-100 text-pink-700 text-xs rounded-full border border-pink-200"
                                           whileHover={{ scale: 1.05, y: -1 }}
                                           transition={{ duration: 0.2 }}
+                                          title={`Relevance: ${(source.relevanceScore * 100).toFixed(1)}%`}
                                         >
-                                          {source.includes('.pdf') && <FileText className="h-3 w-3" />}
-                                          {source.includes('.com') && <Globe className="h-3 w-3" />}
-                                          {source.includes('Text Document') && <Type className="h-3 w-3" />}
-                                          {source === 'System' && <Bot className="h-3 w-3" />}
-                                          <span>{source}</span>
+                                          {getSourceIcon(source.metadata.sourceType)}
+                                          <span>{source.metadata.sourceName}</span>
+                                          <span className="text-pink-500 font-mono">
+                                            {(source.relevanceScore * 100).toFixed(0)}%
+                                          </span>
                                         </motion.div>
                                       ))}
                                     </div>
@@ -396,7 +440,7 @@ export default function ChatInterface() {
                 <div className="w-1 h-1 bg-pink-500 rounded-full"></div>
                 <div className="w-1 h-1 bg-pink-500 rounded-full"></div>
                 <div className="w-1 h-1 bg-pink-500 rounded-full"></div>
-                <span>AI is typing</span>
+                <span>AI is thinking</span>
               </motion.div>
             )}
           </div>
